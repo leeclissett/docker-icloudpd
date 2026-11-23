@@ -1,3 +1,12 @@
+# docker-icloudpd (leeclissett fork)
+This is a fork of [boredazfcuk/docker-icloudpd](https://github.com/boredazfcuk/docker-icloudpd) at build 1381. It differs in three ways:
+
+- iCloudPD is 1.34.0, not 1.32.3.
+- It adds the **ignore_indexing_state** option, for accounts where every download fails with "Apple iCloud Photo Library has not finished indexing yet" (upstream issue #980). See CONFIGURATION.md.
+- Images are published to `ghcr.io/leeclissett/icloudpd`, for linux/amd64 only, with one immutable tag per build version and no `latest`.
+
+Everything below is the upstream README.
+
 # docker-icloudpd
 An Alpine Linux Docker container for iCloud Photos Downloader. I use it for syncing the photo streams of all the iDevices in my house back to my server because it's the only way of backing up multiple devices to a single location. It uses the system keyring to securely store credentials, has HEIC to JPG conversion capability, and can send Telegram, Prowl, Pushover, WebHook, DingTalk, Discord, openhab, IYUU, WeCom, msmtp & Signal notifications. Please note, Apple's Advanced Data Protection (ADP) is not supported. ADP must be disabled for this container to work.
 

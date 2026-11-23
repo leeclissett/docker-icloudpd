@@ -108,6 +108,7 @@ initialise_script()
       skip_check=true
    fi
    log_info " | Skip download check: ${skip_check}"
+   log_info " | Ignore indexing state: ${ignore_indexing_state:-false}"
    log_info " | Skip live photos: ${skip_live_photos}"
    if [ -n "${recent_only}" ]
    then
@@ -241,14 +242,39 @@ sync_log_next_line()
    echo "$(( $(wc -l < /tmp/icloudpd/icloudpd_sync.log 2>/dev/null || echo 0) + 1 ))"
 }
 
+indexing_state_option()
+{
+   # Since October 2026 iCloud reports some libraries as still indexing (RUNNING) on every check,
+   # although they list normally (icloud_photos_downloader issue #1387). iCloudPD 1.34.0 and later
+   # carries on past that with --ignore-indexing-state. Prints the option with a leading space, or
+   # nothing, so it can be dropped straight into a command line.
+   if [ "${ignore_indexing_state:-false}" = "true" ]
+   then
+      printf '%s' " --ignore-indexing-state"
+   fi
+}
+
+warn_if_indexing_state_ignored()
+{
+   # iCloudPD says so itself, but as one line among thousands. Repeat it at the end of the run,
+   # from line ${1} of the sync log, so a download that may be incomplete isn't mistaken for a
+   # complete one.
+   if tail -n +"${1}" /tmp/icloudpd/icloudpd_sync.log 2>/dev/null | grep -q "continuing because of --ignore-indexing-state"
+   then
+      log_warning "iCloud reported the photo library as still indexing and ignore_indexing_state is set, so iCloudPD carried on. Everything iCloud listed has been downloaded, but the listing may be incomplete"
+   fi
+}
+
 flag_incomplete_download()
 {
    # The iCloudPD release binary exits 0 even when it fails, e.g. on "has not finished indexing yet"
    # (icloud_photos_downloader issue #1372), so a zero exit code doesn't mean the download finished.
    # A run that gets to the end always logs "All photos and videos have been downloaded" (or the
-   # photos/videos variant). If this run's output, from line ${1} of the sync log, doesn't have it,
+   # photos/videos variant). With --ignore-indexing-state (iCloudPD 1.34.0 and later) the wording is
+   # "All photos and videos that iCloud listed have been downloaded...", which also means the run
+   # got to the end. If this run's output, from line ${1} of the sync log, doesn't have it,
    # mark the run as failed so the usual failure handling and notification kick in.
-   if [ "$(cat /tmp/icloudpd/icloudpd_download_exit_code)" -eq 0 ] && ! tail -n +"${1}" /tmp/icloudpd/icloudpd_sync.log | grep -qE "All (photos and videos|photos|videos) have been downloaded"
+   if [ "$(cat /tmp/icloudpd/icloudpd_download_exit_code)" -eq 0 ] && ! tail -n +"${1}" /tmp/icloudpd/icloudpd_sync.log | grep -qE "All (photos and videos|photos|videos)( that iCloud listed)? have been downloaded"
    then
       echo 1 >/tmp/icloudpd/icloudpd_download_exit_code
       echo "iCloudPD exited without finishing the download. Last message: $(tail -n +"${1}" /tmp/icloudpd/icloudpd_sync.log | grep -v '^$' | tail -n 1)" >>/tmp/icloudpd/icloudpd_download_error
@@ -535,7 +561,7 @@ list_libraries()
    IFS=$'\n'
    if [ "${skip_download}" = "false" ]
    then
-      shared_libraries="$(run_as "/opt/icloudpd/bin/icloudpd --username ${apple_id} --cookie-directory /config --domain ${auth_domain} --directory /dev/null --list-libraries | sed '1d'")"
+      shared_libraries="$(run_as "/opt/icloudpd/bin/icloudpd --username ${apple_id} --cookie-directory /config --domain ${auth_domain} --directory /dev/null$(indexing_state_option) --list-libraries | sed '1d'")"
    fi
    log_info "Shared libraries:"
    for library in ${shared_libraries}
@@ -562,7 +588,7 @@ list_albums()
    IFS=$'\n'
    if [ "${skip_download}" = "false" ]
    then
-      photo_albums="$(run_as "/opt/icloudpd/bin/icloudpd --username ${apple_id} --cookie-directory /config --domain ${auth_domain} --directory /dev/null --list-albums | sed '1d' | sed '/^Albums:$/d'")"
+      photo_albums="$(run_as "/opt/icloudpd/bin/icloudpd --username ${apple_id} --cookie-directory /config --domain ${auth_domain} --directory /dev/null$(indexing_state_option) --list-albums | sed '1d' | sed '/^Albums:$/d'")"
    fi
    log_info "Photo albums:"
    for photo_album in ${photo_albums}
@@ -968,9 +994,9 @@ check_files()
          for library in ${libraries_to_check}
          do
             log_debug "Checking album '${album_arg}' in library: ${library}"
-            log_debug "Launch command: /opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames --library ${library} --album ${album_arg}"
+            log_debug "Launch command: /opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames$(indexing_state_option) --library ${library} --album ${album_arg}"
             >/tmp/icloudpd/icloudpd_check_error_tmp
-            run_as "(/opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames --library \"${library}\" --album \"${album_arg}\" 2>/tmp/icloudpd/icloudpd_check_error_tmp; echo \$? >/tmp/icloudpd/icloudpd_check_exit_code) | tee -a /tmp/icloudpd/icloudpd_check.log"
+            run_as "(/opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames$(indexing_state_option) --library \"${library}\" --album \"${album_arg}\" 2>/tmp/icloudpd/icloudpd_check_error_tmp; echo \$? >/tmp/icloudpd/icloudpd_check_exit_code) | tee -a /tmp/icloudpd/icloudpd_check.log"
             if grep -q "KeyError" /tmp/icloudpd/icloudpd_check_error_tmp 2>/dev/null
             then
                log_debug "Album '${album_arg}' not found in library '${library}', skipping"
@@ -998,8 +1024,8 @@ check_files()
       for library in ${libraries_to_check}
       do
          log_debug "Checking library: ${library}"
-         log_debug "Launch command: /opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames --library ${library}"
-         run_as "(/opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames --library \"${library}\" 2>>/tmp/icloudpd/icloudpd_check_error; echo \$? >/tmp/icloudpd/icloudpd_check_exit_code) | tee -a /tmp/icloudpd/icloudpd_check.log"
+         log_debug "Launch command: /opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames$(indexing_state_option) --library ${library}"
+         run_as "(/opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames$(indexing_state_option) --library \"${library}\" 2>>/tmp/icloudpd/icloudpd_check_error; echo \$? >/tmp/icloudpd/icloudpd_check_exit_code) | tee -a /tmp/icloudpd/icloudpd_check.log"
          local library_exit_code
          library_exit_code="$(cat /tmp/icloudpd/icloudpd_check_exit_code)"
          if [ "${library_exit_code}" -ne 0 ]
@@ -1010,12 +1036,12 @@ check_files()
       IFS="${OLDIFS}"
    elif [ -n "${photo_album}" ] && [ "${photo_album}" != "all albums" ]
    then
-      log_debug "Launch command: /opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames --album ${photo_album}"
-      run_as "(/opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames --album \"${photo_album}\" 2>/tmp/icloudpd/icloudpd_check_error; echo \$? >/tmp/icloudpd/icloudpd_check_exit_code) | tee /tmp/icloudpd/icloudpd_check.log"
+      log_debug "Launch command: /opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames$(indexing_state_option) --album ${photo_album}"
+      run_as "(/opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames$(indexing_state_option) --album \"${photo_album}\" 2>/tmp/icloudpd/icloudpd_check_error; echo \$? >/tmp/icloudpd/icloudpd_check_exit_code) | tee /tmp/icloudpd/icloudpd_check.log"
       check_exit_code="$(cat /tmp/icloudpd/icloudpd_check_exit_code)"
    else
-      log_debug "Launch command: /opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames"
-      run_as "(/opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames 2>/tmp/icloudpd/icloudpd_check_error; echo \$? >/tmp/icloudpd/icloudpd_check_exit_code) | tee /tmp/icloudpd/icloudpd_check.log"
+      log_debug "Launch command: /opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames$(indexing_state_option)"
+      run_as "(/opt/icloudpd/bin/icloudpd --directory ${download_path} --cookie-directory /config --username ${apple_id} --domain ${auth_domain} --folder-structure ${folder_structure} --keep-unicode-in-filenames --only-print-filenames$(indexing_state_option) 2>/tmp/icloudpd/icloudpd_check_error; echo \$? >/tmp/icloudpd/icloudpd_check_exit_code) | tee /tmp/icloudpd/icloudpd_check.log"
       check_exit_code="$(cat /tmp/icloudpd/icloudpd_check_exit_code)"
    fi
    if [ "${check_exit_code}" -ne 0 ] || [ -s /tmp/icloudpd/icloudpd_check_error ]
@@ -1118,7 +1144,7 @@ resolve_library_list()
    if [ "${photo_library}" = "all libraries" ]
    then
       log_debug "Fetching libraries list..." >&2
-      all_libraries="$(run_as "/opt/icloudpd/bin/icloudpd --username ${apple_id} --cookie-directory /config --domain ${auth_domain} --directory /dev/null --list-libraries" | sed '/^[0-9]/d' | sed '/^Libraries:$/d')"
+      all_libraries="$(run_as "/opt/icloudpd/bin/icloudpd --username ${apple_id} --cookie-directory /config --domain ${auth_domain} --directory /dev/null$(indexing_state_option) --list-libraries" | sed '/^[0-9]/d' | sed '/^Libraries:$/d')"
       log_debug "Building list of libraries..." >&2
       IFS=$'\n'
       for library in ${all_libraries}
@@ -1147,7 +1173,7 @@ download_albums()
    local all_albums albums_to_download
    if [ "${photo_album}" = "all albums" ]
    then
-      all_albums="$(run_as "/opt/icloudpd/bin/icloudpd --username ${apple_id} --cookie-directory /config --domain ${auth_domain} --directory /dev/null --list-albums | sed '1d' | sed '/^Albums:$/d'")"
+      all_albums="$(run_as "/opt/icloudpd/bin/icloudpd --username ${apple_id} --cookie-directory /config --domain ${auth_domain} --directory /dev/null$(indexing_state_option) --list-albums | sed '1d' | sed '/^Albums:$/d'")"
       log_debug "Buildling list of albums to download..."
       IFS=$'\n'
       for album in ${all_albums}
@@ -1208,6 +1234,7 @@ download_albums()
                run_as "(/opt/icloudpd/bin/icloudpd ${command_line} --log-level ${log_level} --folder-structure \"${library}/${album}\" --album \"${album}\" --library \"${library}\" 2>/tmp/icloudpd/icloudpd_download_error; echo \$? >/tmp/icloudpd/icloudpd_download_exit_code) | tee -a /tmp/icloudpd/icloudpd_sync.log"
             fi
             flag_incomplete_download "${sync_log_start}"
+            warn_if_indexing_state_ignored "${sync_log_start}"
             if grep -q "KeyError" /tmp/icloudpd/icloudpd_download_error 2>/dev/null
             then
                log_debug "Album '${album}' not found in library '${library}', skipping"
@@ -1250,6 +1277,7 @@ download_albums()
             run_as "(/opt/icloudpd/bin/icloudpd ${command_line} --log-level ${log_level} --folder-structure \"${album}\" --album \"${album}\" 2>/tmp/icloudpd/icloudpd_download_error; echo \$? >/tmp/icloudpd/icloudpd_download_exit_code) | tee -a /tmp/icloudpd/icloudpd_sync.log"
          fi
          flag_incomplete_download "${sync_log_start}"
+         warn_if_indexing_state_ignored "${sync_log_start}"
          if [ "$(cat /tmp/icloudpd/icloudpd_download_exit_code)" -ne 0 ]
          then
             log_error "Failed downloading album: ${album}"
@@ -1282,6 +1310,7 @@ download_libraries()
          run_as "(/opt/icloudpd/bin/icloudpd ${command_line} --log-level "${log_level}" --folder-structure "${library}" --library "${library}" 2>/tmp/icloudpd/icloudpd_download_error; echo \$? >/tmp/icloudpd/icloudpd_download_exit_code) | tee -a /tmp/icloudpd/icloudpd_sync.log"
       fi
       flag_incomplete_download "${sync_log_start}"
+      warn_if_indexing_state_ignored "${sync_log_start}"
       if [ "$(cat /tmp/icloudpd/icloudpd_download_exit_code)" -ne 0 ]
       then
          log_error "Failed downloading library: ${library}"
@@ -1300,6 +1329,7 @@ download_photos()
    then
       run_as "(/opt/icloudpd/bin/icloudpd ${command_line} --log-level ${log_level} 2>/tmp/icloudpd/icloudpd_download_error; echo \$? >/tmp/icloudpd/icloudpd_download_exit_code) | tee /tmp/icloudpd/icloudpd_sync.log"
       flag_incomplete_download 1
+      warn_if_indexing_state_ignored 1
    else
       log_debug "Skip download: ${skip_download} - skipping"
       echo 0 >/tmp/icloudpd/icloudpd_download_exit_code
@@ -2385,6 +2415,7 @@ command_line_builder()
    then
       command_line="${command_line} --skip-created-before ${skip_created_before}"
    fi
+   command_line="${command_line}$(indexing_state_option)"
 }
 
 wait_for_next_download()
