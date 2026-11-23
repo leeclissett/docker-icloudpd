@@ -447,6 +447,16 @@ then
    log_error "   | The variables auto_delete and delete_after_download cannot both be configured at the same time. Please choose one or the other. Halting"
    sleep infinity
 fi
+if [ "${ignore_indexing_state:-false}" = "true" ]
+then
+   # iCloudPD refuses these combinations itself: a listing that really is incomplete must never lead to deletions
+   if [ "${auto_delete}" != "false" ] || [ "${delete_after_download}" != "false" ] || [ "${keep_icloud_recent_only}" = "true" ]
+   then
+      log_error "   | The variable ignore_indexing_state cannot be used with auto_delete, delete_after_download or keep_icloud_recent_only, as an incomplete listing could then lead to files being deleted. Halting"
+      sleep infinity
+   fi
+   log_warning "   | ignore_indexing_state is enabled. Downloads carry on when iCloud reports the photo library as still indexing, so a run may not see every file. Set it back to false once iCloud reports the library as indexed again"
+fi
 if [ "${sideways_copy_videos_mode}" = "move" ] && [ "${delete_after_download}" = "false" ]
 then
    log_error "   | The variable sideways_copy_videos_mode cannot be set to 'move' unless delete_after_download is set to 'true', otherwise all icloud videos will be downloaded every run. Please set the copy mode to 'copy' or delete_after_download to 'true'. Halting"

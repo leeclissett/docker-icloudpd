@@ -184,6 +184,8 @@ rm -f "${notifications_sent}"
 # Needs root (run_as uses su), which the docker run in the header gives you.
 eval "$(extract_function run_as)"
 eval "$(extract_function sync_log_next_line)"
+eval "$(extract_function indexing_state_option)"
+eval "$(extract_function warn_if_indexing_state_ignored)"
 eval "$(extract_function flag_incomplete_download)"
 eval "$(extract_function download_photos)"
 log_debug() { :; }
@@ -234,6 +236,74 @@ skip_download="true"
 download_photos >/dev/null
 assert_equals "download_photos: skip_download is not flagged" \
    "$(cat /tmp/icloudpd/icloudpd_download_exit_code)" "0"
+
+##### ignore_indexing_state #####
+
+# With --ignore-indexing-state iCloudPD 1.34.0 warns at the start of the run and words the last
+# line differently. That is still a run that got to the end.
+indexing_ignored="2026-11-23 09:36:45 WARNING  Library PrimarySync is still reported as indexing (RUNNING on all 15 checks), continuing because of --ignore-indexing-state; the listing may be incomplete"
+listed="2026-11-23 10:15:02 WARNING  All photos and videos that iCloud listed have been downloaded, but the listing may be incomplete: iCloud still reported the library as indexing and --ignore-indexing-state was used. A later run without the option picks up what is missing"
+warnings_logged="/tmp/icloudpd_test_warnings"
+log_warning() { printf '%s\n' "${1}" >> "${warnings_logged}"; }
+skip_download="false"
+
+: > "${warnings_logged}"
+export FAKE_OUTPUT="${indexing_ignored}\n${listed}" FAKE_EXIT=0
+download_photos >/dev/null
+assert_equals "download_photos: ignore-indexing-state wording counts as finished" \
+   "$(cat /tmp/icloudpd/icloudpd_download_exit_code)" "0"
+assert_equals "download_photos: ignore-indexing-state run leaves no error" \
+   "$(wc -c < /tmp/icloudpd/icloudpd_download_error | tr -d ' ')" "0"
+assert_equals "download_photos: ignore-indexing-state run logs one warning" \
+   "$(wc -l < "${warnings_logged}" | tr -d ' ')" "1"
+
+: > "${warnings_logged}"
+export FAKE_OUTPUT="${indexing_ignored}\n2026-11-23 10:15:02 WARNING  All photos that iCloud listed have been downloaded, but the listing may be incomplete" FAKE_EXIT=0
+download_photos >/dev/null
+assert_equals "download_photos: ignore-indexing-state with skip_videos wording counts as finished" \
+   "$(cat /tmp/icloudpd/icloudpd_download_exit_code)" "0"
+
+: > "${warnings_logged}"
+export FAKE_OUTPUT="${indexing_ignored}\n${not_indexed}" FAKE_EXIT=0
+download_photos >/dev/null
+assert_equals "download_photos: ignored indexing state without the completion message is a failure" \
+   "$(cat /tmp/icloudpd/icloudpd_download_exit_code)" "1"
+
+: > "${warnings_logged}"
+export FAKE_OUTPUT="${completed}" FAKE_EXIT=0
+download_photos >/dev/null
+assert_equals "download_photos: ordinary finished run logs no indexing warning" \
+   "$(wc -l < "${warnings_logged}" | tr -d ' ')" "0"
+
+unset ignore_indexing_state
+assert_equals "indexing_state_option: nothing when unset" "$(indexing_state_option)" ""
+ignore_indexing_state="false"
+assert_equals "indexing_state_option: nothing when false" "$(indexing_state_option)" ""
+ignore_indexing_state="true"
+assert_equals "indexing_state_option: the option, with a leading space, when true" \
+   "$(indexing_state_option)" " --ignore-indexing-state"
+
+eval "$(extract_function command_line_builder)"
+download_path="/home/user/iCloud"; auth_domain="com"; apple_id="someone@example.com"
+photo_size="original"; set_exif_datetime="false"; keep_unicode="false"
+live_photo_mov_filename_policy="suffix"; align_raw="as-is"
+file_match_policy="name-size-dedup-with-suffix"; auto_delete="false"; delete_after_download="false"
+skip_live_photos="false"; live_photo_size="original"; skip_videos="false"; folder_structure="{:%Y/%m}"
+unset keep_icloud_recent_only keep_icloud_recent_days xmp_sidecar photo_album photo_library until_found recent_only skip_created_after skip_created_before
+
+ignore_indexing_state="true"
+command_line_builder
+assert_equals "command_line_builder: adds the option when ignore_indexing_state is true" \
+   "${command_line}" \
+   "--directory /home/user/iCloud --cookie-directory /config --domain com --username someone@example.com --no-progress-bar --size original --folder-structure {:%Y/%m} --ignore-indexing-state"
+
+ignore_indexing_state="false"
+command_line_builder
+assert_equals "command_line_builder: unchanged when ignore_indexing_state is false" \
+   "${command_line}" \
+   "--directory /home/user/iCloud --cookie-directory /config --domain com --username someone@example.com --no-progress-bar --size original --folder-structure {:%Y/%m}"
+
+rm -f "${warnings_logged}"
 
 unset FAKE_OUTPUT FAKE_EXIT
 rm -f /opt/icloudpd/bin/icloudpd /tmp/icloudpd/icloudpd_sync.log /tmp/icloudpd/icloudpd_download_exit_code /tmp/icloudpd/icloudpd_download_error

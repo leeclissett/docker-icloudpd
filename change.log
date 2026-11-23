@@ -1,3 +1,11 @@
+23/11/2026
+
+ - Updated iCloudPD from 1.32.3 to 1.34.0. 1.33.0 retries the library indexing check 15 times before giving up, and 1.34.0 adds --ignore-indexing-state
+ - Added ignore_indexing_state. Since October 2026 iCloud reports some libraries as still indexing on every check although they list normally, so every download ends with "Apple iCloud Photo Library has not finished indexing yet" (issue #980, icloud_photos_downloader issue #1387). When it's set to true, the container passes --ignore-indexing-state to every iCloudPD launch that reads the library: downloads, the new files check, and the library and album listings. Default is false, so nothing changes unless you turn it on
+ - With that option iCloudPD ends a run with "All photos and videos that iCloud listed have been downloaded, but the listing may be incomplete" rather than "All photos and videos have been downloaded". The completion check added on 15/10/2026 now accepts that wording as a finished run, otherwise the option would turn every download into a failure. The container logs a warning after such a run, so it isn't mistaken for a complete one
+ - The container halts on startup if ignore_indexing_state is combined with auto_delete, delete_after_download or keep_icloud_recent_only. iCloudPD refuses those combinations too: an incomplete listing must never lead to deletions
+ - Added tests for the option and the completion check to tests/run_tests.sh
+
 15/10/2026
 
  - Fixed failed downloads being reported as successful, so no failure notification was ever sent. Every iCloudPD launch wrote `echo $?` inside a double-quoted run_as string, so the script expanded `$?` itself before iCloudPD had run, and the saved exit code was always 0. It's now escaped, so the inner shell records iCloudPD's real exit code

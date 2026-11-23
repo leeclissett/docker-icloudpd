@@ -43,6 +43,8 @@ Currently, I only reccomend setting one container environment variable, TZ, as t
 
 **skip_check**: Set this to **true** skip the check for new files. The check can have issues with large libraries, please set to **true** if you have more than a few thousand photos. Default: false.
 
+**ignore_indexing_state**: Set this to **true** to carry on downloading when iCloud keeps reporting the photo library as still indexing. Since October 2026 iCloud answers the indexing check with "RUNNING" on every attempt for some accounts, although the library lists normally, and every download then fails with "Apple iCloud Photo Library has not finished indexing yet". With this option the container passes **--ignore-indexing-state** to iCloudPD (1.34.0 or later), which downloads everything iCloud lists and says at the end of the run that the listing may be incomplete. The container repeats that as a warning and treats the run as finished. It cannot be combined with **auto_delete**, **delete_after_download** or **keep_icloud_recent_only**, because an incomplete listing must never lead to deletions; the container halts on startup if you try. Set it back to **false** once your library is reported as indexed again. Default: false.
+
 **download_notifications**: specifies whether notifications with a short summary should be sent for file downloads. Default: true.
 
 **delete_notifications**: Specifies whether notifications with a short summary should be sent for file deletions. Default: true.

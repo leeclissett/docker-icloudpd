@@ -106,6 +106,7 @@ write_variable gotify_server_url
 write_variable group group
 write_variable group_id 1000
 write_variable icloud_china false
+write_variable ignore_indexing_state false
 write_variable iyuu_token
 write_variable jpeg_path
 write_variable jpeg_quality 90
